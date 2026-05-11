@@ -6,7 +6,7 @@ Inspired by the [UC Berkeley Mathematics Interactive Course Map](https://math.be
 
 ## Overview
 This tool is designed specifically for Mathematics majors. 
-To keep the map clean and relevant, the following courses are filtered out:
+To keep the map clean and relevant, the following courses are excluded:
 - Courses targeted at Engineering and Computer Science (e.g., MA15xx).
 - Internship and Research-coded courses.
 - Bridging courses (e.g., MA13xx).
@@ -26,3 +26,14 @@ To keep the map clean and relevant, the following courses are filtered out:
 ## How to Use
 1. Clone this repository.
 2. Open `index.html` in your web browser.
+
+## Future Improvements
+1. **Proper prerequisite logic parsing**: 
+Currently, prerequisites are extracted using regex.
+This only detects module codes and does not preserve logical structure, such as AND relationships, OR relationships, and nested prerequisite groups.
+
+2. **Searching**: Add a search bar to quickly locate courses by course code, course title, keywords.
+
+3. **Filtering**: Filtering options could include course level, semester offered, pure/applied/statistics tracks, undergraduate/graduate courses.
+
+4. **Colour-coded academic tracks**: Courses could be visually grouped by specialisation.

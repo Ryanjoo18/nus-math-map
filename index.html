@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <title>NUS Mathematics Interactive Course Map</title>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
     <script src="https://unpkg.com/dagre@0.7.4/dist/dagre.js"></script>
     <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
@@ -71,31 +72,31 @@
 
     <script>
       /**
-       * Dynamically calculates the current NUS Academic Year based on August start.
+       * Calculates current Academic Year based on August start.
        */
       function getTargetAY() {
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = now.getMonth();
+        const now = new Date(); // Gets current date/time
+        const year = now.getFullYear(); // Extract year
+        const month = now.getMonth(); // Extract month, where January = 0, February = 1, ...
         return month < 7 ? `${year - 1}-${year}` : `${year}-${year + 1}`;
       }
 
       /**
-       * Fetches module data with a fallback mechanism.
+       * Fetches module data.
        */
       async function fetchModuleData(ay) {
         try {
           const response = await fetch(
             `https://api.nusmods.com/v2/${ay}/moduleInformation.json`,
-          );
-          if (!response.ok) throw new Error("AY not available");
+          ); // Fetch JSON data from NUSMods
+          if (!response.ok) throw new Error("AY not available"); // If request failed, throw an error
           return await response.json();
         } catch (e) {
-          const prevYear = parseInt(ay.split("-")[0]) - 1;
-          const prevAY = `${prevYear}-${prevYear + 1}`;
+          const prevYear = parseInt(ay.split("-")[0]) - 1; // For example, "2025-2026" becomes 2024
+          const prevAY = `${prevYear}-${prevYear + 1}`; // Construct previous AY
           const response = await fetch(
             `https://api.nusmods.com/v2/${prevAY}/moduleInformation.json`,
-          );
+          ); // Retry fetch using previous AY
           return await response.json();
         }
       }
@@ -107,7 +108,8 @@
       async function initGraph() {
         const AY = getTargetAY();
 
-        // Modules that are not part of the core math major dependency chain
+        // Modules that are not part of core mathematics major dependency chain
+        // A Set is used instead of array for fast membership checking
         const excludedModules = new Set([
           "MA1301",
           "MA1301X",
@@ -125,8 +127,8 @@
         ]);
 
         try {
-          const modules = await fetchModuleData(AY);
-          document.getElementById("loading").style.display = "none";
+          const modules = await fetchModuleData(AY); // Downloads all module information, for ALL NUS modules, not only mathematics, filter later
+          document.getElementById("loading").style.display = "none"; // Hide loading indicator
 
           // Filter for Math modules (MA prefix) that are currently offered
           const offeredMath = modules.filter(
@@ -137,15 +139,26 @@
               m.semesterData.length > 0,
           );
 
-          const validCodes = new Set(offeredMath.map((m) => m.moduleCode));
-          const connectedNodes = new Set();
+          const validCodes = new Set(offeredMath.map((m) => m.moduleCode)); // Creates a set containing all filtered module codes
+          const connectedNodes = new Set(); // Create set of connected nodes, which tracks modules that actually participate in prerequisite relationships
 
           // Exclude nodes without connections
-          offeredMath.forEach((mod) => {
-            const prereqs = mod.prerequisite
-              ? mod.prerequisite.match(/[A-Z]{2,3}\d{4}[A-Z]{0,1}/g) || []
-              : [];
-            prereqs.forEach((p) => {
+          offeredMath.forEach((mod) => 
+          // Loop through every filtered math module
+          {
+            const prereqs = mod.prerequisite // Extract prerequisites
+              ? mod.prerequisite.match(/[A-Z]{2,3}\d{4}[A-Z]{0,1}/g) || [] : []; 
+              // This regex extracts module codes from freeform text
+              // [A-Z]{2,3} matches 2 or 3 uppercase letters
+              // \d{4} matches exactly 4 digits
+              // [A-Z]{0,1} matches an optional trailing letter (variant of module)
+              // /g performs a global match, i.e., find all matches
+              // If no matches found, return empty array instead of null
+              // If no prerequisite, return empty array
+
+            prereqs.forEach((p) => 
+            // Loop through extracted prerequisite module codes
+            {
               if (validCodes.has(p)) {
                 connectedNodes.add(p);
                 connectedNodes.add(mod.moduleCode);
@@ -154,45 +167,51 @@
           });
 
           // Prepare elements for Cytoscape
+          // This array will contain node definitions and edge definitions
           const elements = [];
           offeredMath
-            .filter((m) => connectedNodes.has(m.moduleCode))
+            .filter((m) => connectedNodes.has(m.moduleCode)) // Remove isolated modules, only keep modules participating in at least one edge
             .forEach((mod) => {
               const code = mod.moduleCode;
 
-              // Tier Logic: Extract level from course code (e.g., MA1xxx = Level 1)
+              // Compute hierarchy level: Extract level from course code (e.g., MA1xxx = Level 1)
               // MA2001/2002 are foundational and forced to Level 1
               let level =
                 code === "MA2001" || code === "MA2002"
                   ? 1
-                  : parseInt(code.match(/\d/)[0]);
-
+                  : parseInt(code.match(/\d/)[0]); // Regex to extract first digit
+              
+              // Add node definitions to elements array
               elements.push({
+                // Cytoscape stores node metadata inside data
                 data: {
-                  id: code,
-                  label: code,
-                  title: mod.title,
-                  desc: mod.description || "",
-                  level: level,
+                  id: code, // node id
+                  label: code, // node label - displayed text on node
+                  title: mod.title, // course title, stored for info card
+                  desc: mod.description || "", // module description, fallbacks to empty string if missing
+                  level: level, // stores hierarchy level
                 },
               });
 
-              // Map Edges (Prerequisites)
+              // Build edges using prerequisites
               const prereqs = mod.prerequisite
                 ? mod.prerequisite.match(/[A-Z]{2,3}\d{4}[A-Z]{0,1}/g) || []
                 : [];
-              prereqs.forEach((p) => {
+              prereqs.forEach((p) => 
+              // Loop through prerequisites
+              {
                 if (validCodes.has(p)) {
-                  elements.push({ data: { source: p, target: code } });
+                  elements.push({ data: { source: p, target: code } }); // Push edge object (a directed edge)
                 }
               });
             });
-
+          
+          // Create a Cytoscape instance, which corresponds to a graph
           const cy = cytoscape({
-            container: document.getElementById("cy"),
+            container: document.getElementById("cy"), // container to render in
             elements: elements,
             style: [
-              {
+              { // style nodes
                 selector: "node",
                 style: {
                   label: "data(label)",
@@ -210,13 +229,13 @@
                   "font-weight": "normal",
                 },
               },
-              {
+              { // style edges
                 selector: "edge",
                 style: {
                   width: 2,
                   "line-color": "#000",
                   "target-arrow-color": "#000",
-                  "target-arrow-shape": "vee",
+                  "target-arrow-shape": "triangle",
                   "curve-style": "straight",
                   "arrow-scale": 1.8,
                   opacity: 1,
@@ -225,20 +244,25 @@
             ],
           });
 
-          // Hierarchy Layout Logic
+          // Get a new layout, which can be used to algorithmically position the nodes in the graph
+          // In this case, we specify logic for a hierarchical layout
           const layout = cy.layout({
-            name: "dagre",
-            rankDir: "TB",
-            animate: false,
+            name: "dagre", // Dagre layout for DAGs and trees, it organises the graph in a hierarchy
+            rankDir: "TB", // Top -> Bottom, so hierarchy flows downward
+            animate: false, // Layout appears instantly, no transition animation
             padding: 80,
-            nodeSep: 150,
-            rankSep: 400,
-            stop: function () {
-              const maxInRow = 5; // Limits horizontal width
-              const levelCounts = {};
+            nodeSep: 150, // Horizontal spacing between nodes
+            rankSep: 400, // Vertical spacing between hierarchy levels
 
-              cy.nodes().forEach((node) => {
-                const level = node.data("level");
+            // Custom positioning - this function runs after Dagre finishes computing layout
+            stop: function () {
+              const maxInRow = 5; // max number of nodes in each row
+              const levelCounts = {}; // tracks number of nodes placed at each level
+
+              cy.nodes().forEach((node) => 
+              // Loop through every node in graph
+              {
+                const level = node.data("level"); // Retrieves previously stored level value
                 if (!levelCounts[level]) levelCounts[level] = 0;
 
                 const count = levelCounts[level];
@@ -248,46 +272,49 @@
                 node.position("y", level * 900 + subLevel * 300);
                 levelCounts[level]++;
               });
-              cy.fit(100);
+              cy.fit(100); // Fit graph to viewport
             },
           });
 
           layout.run();
 
           // Node Tap Handler: Highlight prerequisite path and show course details
+          // Event listener (when a node is clicked/tapped, run this function)
           cy.on("tap", "node", function (evt) {
-            const node = evt.target;
-            const fullDesc = node.data("desc");
-            const maxDescLength = 300;
+            const node = evt.target; // Get the node that was clicked
+            const fullDesc = node.data("desc"); // Retrieve module description
+            const maxDescLength = 300; // Maximum length of description
 
-            // Clean truncation of description
+            // Truncate description
             let displayDesc = fullDesc;
-            if (fullDesc.length > maxDescLength) {
+            if (fullDesc.length > maxDescLength) { // If description is too long, truncate it
               displayDesc =
                 fullDesc.substring(
                   0,
-                  fullDesc.lastIndexOf(" ", maxDescLength),
+                  fullDesc.lastIndexOf(" ", maxDescLength), // Searches backward from to find the nearest space - this avoids words truncated into half
                 ) + "...";
             }
 
+            // Update info card
             document.getElementById("details").innerHTML = `
                 <strong style="font-size:1.3em;">${node.data("id")}</strong><br>
                 <em style="color:#444;">${node.data("title")}</em><br><br>
                 ${displayDesc}
             `;
-
-            // Visualisation: Focus on prerequisite chain
+            
+            // Fade entire graph to focus on prerequisite chain, and highlight predecessor nodes
             cy.elements().style("opacity", 0.1);
             node.predecessors().style("opacity", 1);
             node.style("opacity", 1);
           });
-
+          
+          // Background Tap Handler - event listener that listens for ANY tap
           // Reset view on background tap
           cy.on("tap", function (e) {
             if (e.target === cy) {
-              cy.elements().style("opacity", 1);
+              cy.elements().style("opacity", 1); // Reset everything back to fully visible
               document.getElementById("details").innerHTML =
-                "Click on a course node to highlight its prerequisite path.";
+                "Click on a course node to highlight its prerequisite path."; // Reset info card
             }
           });
         } catch (e) {
@@ -295,6 +322,8 @@
           console.error(e);
         }
       }
+      
+      // Start the application
       initGraph();
     </script>
   </body>
