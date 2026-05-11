@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>NUS Mathematics Interactive Course Map</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
+    <script src="https://unpkg.com/dagre@0.7.4/dist/dagre.js"></script>
+    <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+
+    <style>
+      body {
+        font-family: "Helvetica Neue", Arial, sans-serif;
+        margin: 0;
+        background: #fff;
+        overflow: hidden;
+      }
+      #cy {
+        width: 100vw;
+        height: 100vh;
+        display: block;
+      }
+
+      .info-card {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        z-index: 10;
+        background: rgba(255, 255, 255, 0.95);
+        padding: 20px;
+        border: 1px solid #000;
+        width: 350px;
+        pointer-events: none;
+        border-radius: 8px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 20px;
+        border-bottom: 1px solid #000;
+        padding-bottom: 5px;
+        text-transform: uppercase;
+      }
+      #details {
+        font-size: 16px;
+        margin-top: 10px;
+        line-height: 1.5;
+        pointer-events: auto;
+        color: #333;
+      }
+      #loading {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: #000;
+        font-weight: bold;
+        font-size: 1.2em;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="loading">Fetching data...</div>
+
+    <div class="info-card">
+      <h1>NUS Mathematics COURSES</h1>
+      <div id="details">
+        Click on a course node to highlight its prerequisite path.
+      </div>
+    </div>
+
+    <div id="cy"></div>
+
+    <script>
+      /**
+       * Dynamically calculates the current NUS Academic Year based on August start.
+       */
+      function getTargetAY() {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth();
+        return month < 7 ? `${year - 1}-${year}` : `${year}-${year + 1}`;
+      }
+
+      /**
+       * Fetches module data with a fallback mechanism.
+       */
+      async function fetchModuleData(ay) {
+        try {
+          const response = await fetch(
+            `https://api.nusmods.com/v2/${ay}/moduleInformation.json`,
+          );
+          if (!response.ok) throw new Error("AY not available");
+          return await response.json();
+        } catch (e) {
+          const prevYear = parseInt(ay.split("-")[0]) - 1;
+          const prevAY = `${prevYear}-${prevYear + 1}`;
+          const response = await fetch(
+            `https://api.nusmods.com/v2/${prevAY}/moduleInformation.json`,
+          );
+          return await response.json();
+        }
+      }
+
+      /**
+       * Main application logic.
+       * Fetches data, filters relevant modules, and initialises the interactive graph.
+       */
+      async function initGraph() {
+        const AY = getTargetAY();
+
+        // Modules that are not part of the core math major dependency chain
+        const excludedModules = new Set([
+          "MA1301",
+          "MA1301X",
+          "MA1312",
+          "MA1505",
+          "MA1508E",
+          "MA1511",
+          "MA1513",
+          "MA1521",
+          "MA1522",
+          "MA2288",
+          "MA2288R",
+          "MA2289",
+          "MA2289R",
+        ]);
+
+        try {
+          const modules = await fetchModuleData(AY);
+          document.getElementById("loading").style.display = "none";
+
+          // Filter for Math modules (MA prefix) that are currently offered
+          const offeredMath = modules.filter(
+            (m) =>
+              m.moduleCode.startsWith("MA") &&
+              !excludedModules.has(m.moduleCode) &&
+              m.semesterData &&
+              m.semesterData.length > 0,
+          );
+
+          const validCodes = new Set(offeredMath.map((m) => m.moduleCode));
+          const connectedNodes = new Set();
+
+          // Exclude nodes without connections
+          offeredMath.forEach((mod) => {
+            const prereqs = mod.prerequisite
+              ? mod.prerequisite.match(/[A-Z]{2,3}\d{4}[A-Z]{0,1}/g) || []
+              : [];
+            prereqs.forEach((p) => {
+              if (validCodes.has(p)) {
+                connectedNodes.add(p);
+                connectedNodes.add(mod.moduleCode);
+              }
+            });
+          });
+
+          // Prepare elements for Cytoscape
+          const elements = [];
+          offeredMath
+            .filter((m) => connectedNodes.has(m.moduleCode))
+            .forEach((mod) => {
+              const code = mod.moduleCode;
+
+              // Tier Logic: Extract level from course code (e.g., MA1xxx = Level 1)
+              // MA2001/2002 are foundational and forced to Level 1
+              let level =
+                code === "MA2001" || code === "MA2002"
+                  ? 1
+                  : parseInt(code.match(/\d/)[0]);
+
+              elements.push({
+                data: {
+                  id: code,
+                  label: code,
+                  title: mod.title,
+                  desc: mod.description || "",
+                  level: level,
+                },
+              });
+
+              // Map Edges (Prerequisites)
+              const prereqs = mod.prerequisite
+                ? mod.prerequisite.match(/[A-Z]{2,3}\d{4}[A-Z]{0,1}/g) || []
+                : [];
+              prereqs.forEach((p) => {
+                if (validCodes.has(p)) {
+                  elements.push({ data: { source: p, target: code } });
+                }
+              });
+            });
+
+          const cy = cytoscape({
+            container: document.getElementById("cy"),
+            elements: elements,
+            style: [
+              {
+                selector: "node",
+                style: {
+                  label: "data(label)",
+                  "background-color": "#fff",
+                  color: "#000",
+                  "border-width": 2,
+                  "border-color": "#000",
+                  "text-valign": "center",
+                  "text-halign": "center",
+                  "font-size": "48px",
+                  width: "220px",
+                  height: "220px",
+                  shape: "ellipse",
+                  "font-family": '"Helvetica Neue", Arial, sans-serif',
+                  "font-weight": "normal",
+                },
+              },
+              {
+                selector: "edge",
+                style: {
+                  width: 2,
+                  "line-color": "#000",
+                  "target-arrow-color": "#000",
+                  "target-arrow-shape": "vee",
+                  "curve-style": "straight",
+                  "arrow-scale": 1.8,
+                  opacity: 1,
+                },
+              },
+            ],
+          });
+
+          // Hierarchy Layout Logic
+          const layout = cy.layout({
+            name: "dagre",
+            rankDir: "TB",
+            animate: false,
+            padding: 80,
+            nodeSep: 150,
+            rankSep: 400,
+            stop: function () {
+              const maxInRow = 5; // Limits horizontal width
+              const levelCounts = {};
+
+              cy.nodes().forEach((node) => {
+                const level = node.data("level");
+                if (!levelCounts[level]) levelCounts[level] = 0;
+
+                const count = levelCounts[level];
+                const subLevel = Math.floor(count / maxInRow);
+
+                // Manual Y-positioning to ensure level-based stratification
+                node.position("y", level * 900 + subLevel * 300);
+                levelCounts[level]++;
+              });
+              cy.fit(100);
+            },
+          });
+
+          layout.run();
+
+          // Node Tap Handler: Highlight prerequisite path and show course details
+          cy.on("tap", "node", function (evt) {
+            const node = evt.target;
+            const fullDesc = node.data("desc");
+            const maxDescLength = 300;
+
+            // Clean truncation of description
+            let displayDesc = fullDesc;
+            if (fullDesc.length > maxDescLength) {
+              displayDesc =
+                fullDesc.substring(
+                  0,
+                  fullDesc.lastIndexOf(" ", maxDescLength),
+                ) + "...";
+            }
+
+            document.getElementById("details").innerHTML = `
+                <strong style="font-size:1.3em;">${node.data("id")}</strong><br>
+                <em style="color:#444;">${node.data("title")}</em><br><br>
+                ${displayDesc}
+            `;
+
+            // Visualisation: Focus on prerequisite chain
+            cy.elements().style("opacity", 0.1);
+            node.predecessors().style("opacity", 1);
+            node.style("opacity", 1);
+          });
+
+          // Reset view on background tap
+          cy.on("tap", function (e) {
+            if (e.target === cy) {
+              cy.elements().style("opacity", 1);
+              document.getElementById("details").innerHTML =
+                "Click on a course node to highlight its prerequisite path.";
+            }
+          });
+        } catch (e) {
+          document.getElementById("loading").innerText = "Connection error.";
+          console.error(e);
+        }
+      }
+      initGraph();
+    </script>
+  </body>
+</html>
